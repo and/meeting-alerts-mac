@@ -207,6 +207,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 fixedImage.lockFocus()
                 calendarImage.draw(in: NSRect(x: 0, y: 0, width: 16, height: 16))
                 fixedImage.unlockFocus()
+                // Drawing into a fresh NSImage loses the SF Symbol's template flag, which
+                // left the glyph an untinted black bitmap. Template images are tinted by
+                // the system for light/dark, menu-open inversion and accent colors.
+                fixedImage.isTemplate = true
 
                 button.image = fixedImage
                 button.imagePosition = .imageLeading
