@@ -27,10 +27,15 @@ A lightweight macOS menu bar application that displays your upcoming calendar me
 
 ## Installation
 
-1. Open `MeetingsAlert.xcodeproj` in Xcode
-2. Build and run the project (⌘R)
-3. Grant calendar access when prompted
-4. The app will appear in your menu bar
+1. Download `MeetingsAlert.dmg` from the
+   [latest release](https://github.com/and/meeting-alerts-mac/releases/latest)
+2. Open it and drag **MeetingsAlert** into your **Applications** folder
+3. Launch it from Applications (it must be run from Applications, not from the disk image)
+4. Grant calendar access when prompted — on macOS 14+ choose **Full Access**
+5. Quit and relaunch once after granting access; the app then appears in your menu bar
+
+The app is signed with a Developer ID certificate and notarized by Apple, so it opens
+without any Gatekeeper warning. There is no Dock icon — it lives in the menu bar only.
 
 ## Usage
 
@@ -186,10 +191,58 @@ This should not occur in the current version. If it does, restart the app.
 
 ### Building from Source
 
-1. Clone the repository
-2. Open `MeetingsAlert.xcodeproj` in Xcode
-3. Select your development team in project settings
-4. Build and run
+With Xcode: open `MeetingsAlert.xcodeproj`, select your development team, build and run.
+
+Without Xcode (Command Line Tools are enough):
+
+```bash
+./scripts/release.sh --no-notarize
+```
+
+This compiles a universal (arm64 + x86_64) binary with `swiftc`, assembles the `.app`
+bundle, signs it, and writes `build/MeetingsAlert.dmg`.
+
+### Releasing to Other Machines
+
+A build that only runs locally is not enough — macOS Gatekeeper blocks unnotarized apps
+on other people's Macs. The full pipeline is:
+
+```bash
+./scripts/release.sh
+```
+
+It builds, signs with the Developer ID certificate, submits to Apple's notary service,
+staples the ticket, and promotes the result to `MeetingsAlert.dmg` in the repository root.
+Only that final stapled DMG should be shared.
+
+To cut a GitHub release and upload the DMG in the same run:
+
+```bash
+./scripts/release.sh --publish v1.1.0
+```
+
+This refuses to run if the build is not notarized, if the tag is malformed, or if the
+release already exists — bump `MARKETING_VERSION` in the script first. Requires the
+`gh` CLI, authenticated (`gh auth login`).
+
+One-time notarization setup (stores credentials in the login keychain):
+
+```bash
+xcrun notarytool store-credentials MeetingsAlertNotary \
+  --apple-id <your-apple-id> --team-id RLVYQT69D4 \
+  --password <app-specific-password>
+```
+
+App-specific passwords are created at <https://account.apple.com> under
+Sign-In and Security. Requirements: an active Apple Developer Program membership and a
+"Developer ID Application" certificate in the login keychain.
+
+To confirm a DMG is ready to hand out:
+
+```bash
+xcrun stapler validate MeetingsAlert.dmg
+spctl -a -vvv -t open --context context:primary-signature MeetingsAlert.dmg
+```
 
 ### Key Components
 
