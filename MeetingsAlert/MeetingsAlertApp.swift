@@ -1,6 +1,34 @@
 import AppKit
 import ServiceManagement
 
+/// A filled, optionally stroked rounded rect whose colours follow the effective
+/// appearance.
+///
+/// Assigning `someDynamicColor.cgColor` to a layer freezes it: CGColor has no notion of
+/// light or dark, so it keeps whichever appearance happened to be current when it was
+/// resolved. Resolving inside `updateLayer()` instead - which AppKit calls with the
+/// view's effective appearance current, and again whenever that changes - is what makes
+/// these follow the system.
+final class AlertBackgroundView: NSView {
+    var fill: NSColor = .clear
+    var stroke: NSColor?
+    var cornerRadius: CGFloat = 0
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = fill.cgColor
+        layer?.cornerRadius = cornerRadius
+        layer?.borderWidth = stroke == nil ? 0 : 1
+        layer?.borderColor = stroke?.cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
 class MeetingAlertWindowDelegate: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
 
@@ -142,7 +170,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var timer: Timer?
     var scrollTimer: Timer?
     var meetingAlertWindow: NSWindow?
+    /// The meeting the visible panel describes, for its Join and Snooze actions.
+    private var alertPanelMeeting: Meeting?
+    private var snoozeTimer: Timer?
+    /// Whether the panel's attendee card is expanded past the first four.
+    private var alertShowsAllAttendees = false
+    /// Identifies the meeting the panel last fired for, so it shows once rather than on
+    /// every refresh while the meeting sits inside the lead-time window.
     var lastAlertedMeeting: String?
+    /// How far ahead of the start time the panel appears.
+    static let alertLeadTime: TimeInterval = 3 * 60
     var customButton: StatusBarButton?
     var settingsWindow: NSWindow?
 
@@ -160,6 +197,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "displayFormat")
             updateMeetingStatus()
+        }
+    }
+
+    /// Whether Return activates the alert panel's primary button. On by default: the
+    /// panel appears when a meeting is about to start, so joining is the likely intent.
+    private var enterToJoinEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "enterToJoinEnabled") as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "enterToJoinEnabled")
         }
     }
 
@@ -519,12 +567,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateMeetingStatus()
             self?.checkForMeetingAlerts()
         }
+        // Let the system batch this wakeup with work it was already doing. Nothing here
+        // needs 30.000s precision, and an exact fire date keeps the CPU from idling.
+        timer?.tolerance = 5.0
         RunLoop.main.add(timer!, forMode: .common)
     }
 
+    /// Shows the meeting alert panel once per meeting, shortly before it starts.
+    ///
+    /// Called from the 30s timer, from wake, from calendar changes and from the calendar
+    /// access callback. The last two arrive on a background XPC thread, so everything that
+    /// touches AppKit or mutable state is moved to the main thread first - presenting this
+    /// window off the main thread throws an uncaught exception and aborts the process.
     func checkForMeetingAlerts() {
-        // Alerts disabled
-        return
+        guard let meetings = calendarManager?.getUpcomingMeetings() else { return }
+
+        let now = Date()
+        guard let due = meetings.first(where: {
+            let untilStart = $0.startDate.timeIntervalSince(now)
+            return untilStart > 0 && untilStart <= Self.alertLeadTime
+        }) else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // The start date is part of the key so that rescheduling a meeting alerts again.
+            let key = "\(due.title)|\(due.startDate.timeIntervalSince1970)"
+            guard self.lastAlertedMeeting != key, self.meetingAlertWindow == nil else { return }
+            self.lastAlertedMeeting = key
+            self.showMeetingAlert(for: due)
+        }
     }
 
     @objc func openMeetingFromMenu(_ sender: NSMenuItem) {
@@ -596,259 +667,512 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Meeting alert panel
+    //
+    // Implements the "Meeting Alert Window" design, direction 3a ("macOS native"):
+    // grouped inset cards on a window-grey ground, SF system type, hairline separators
+    // inset to the text edge, circular avatars, and trailing-aligned dialog buttons.
+    // The system accent carries the controls; red is reserved for the countdown, which
+    // is the only element that changes as the meeting approaches.
+    //
+    // Sections render only when the calendar actually supplies their data, following
+    // the design's own progressive disclosure (details / + call / + attendees).
+
+    private static let alertPanelWidth: CGFloat = 420
+
+    /// The design's window-grey ground (#ececee), with a dark counterpart.
+    ///
+    /// Both windowBackgroundColor and controlBackgroundColor resolve to white in light
+    /// mode on current macOS, so relying on them left white cards on a white ground with
+    /// only a hairline between them. This states the contrast explicitly while still
+    /// adapting, and in dark mode keeps the ground lighter than the cards, as the
+    /// platform does.
+    private static let alertGround = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.161, green: 0.161, blue: 0.165, alpha: 1)
+            : NSColor(srgbRed: 0.925, green: 0.925, blue: 0.933, alpha: 1)
+    }
+
+    /// Adds `view` to `stack` and pins its width to the stack's, minus the stack's own
+    /// insets. NSStackView's `.width` alignment does not stretch arranged subviews
+    /// reliably here - without this the cards size to their content and sit trailing.
+    /// A view that absorbs slack so the element after it lands on the trailing edge.
+    private func alertSpacer() -> NSView {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return spacer
+    }
+
+    private func addFullWidth(_ view: NSView, to stack: NSStackView) {
+        stack.addArrangedSubview(view)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    /// Wraps `view` in a container that holds it off the edges by `insets`.
+    ///
+    /// NSStackView.edgeInsets only takes effect along the stacking axis: the top and
+    /// bottom of a horizontal stack are ignored, which collapsed every row here to the
+    /// height of its tallest child. Real constraints are the only reliable padding.
+    private func padded(_ view: NSView, _ insets: NSEdgeInsets) -> NSView {
+        let container = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: insets.left),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -insets.right),
+            view.topAnchor.constraint(equalTo: container.topAnchor, constant: insets.top),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -insets.bottom)
+        ])
+        return container
+    }
+
     private func showMeetingAlert(for meeting: Meeting) {
-        // Create a modern, elegant window
-        guard let screen = NSScreen.main else { return }
-        let screenFrame = screen.visibleFrame
+        alertPanelMeeting = meeting
+        alertShowsAllAttendees = false
 
-        let windowWidth: CGFloat = 480
-        let windowHeight: CGFloat = 560
-        let windowX = screenFrame.midX - windowWidth / 2
-        let windowY = screenFrame.midY - windowHeight / 2
-
-        let windowFrame = NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight)
-
-        let window = NSWindow(contentRect: windowFrame,
-                            styleMask: [.titled, .closable, .fullSizeContentView],
-                            backing: .buffered,
-                            defer: false)
-
-        window.title = ""
-        window.titlebarAppearsTransparent = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.alertPanelWidth, height: 200),
+                              styleMask: [.titled, .closable],
+                              backing: .buffered,
+                              defer: false)
+        window.title = "Meeting Alert"
         window.level = .floating
         window.isReleasedWhenClosed = false
-        window.backgroundColor = .clear
-        window.isMovableByWindowBackground = true
 
-        // Set window delegate to handle close
+        let ground = alertContent(for: meeting)
+        window.contentView = ground
+        ground.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: Self.alertPanelWidth, height: ground.fittingSize.height))
+
         let windowDelegate = MeetingAlertWindowDelegate()
         windowDelegate.onClose = { [weak self] in
             self?.meetingAlertWindow = nil
         }
         window.delegate = windowDelegate
-        // Retain delegate with the window
         objc_setAssociatedObject(window, "delegate", windowDelegate, .OBJC_ASSOCIATION_RETAIN)
 
-        // Create content view with visual effect background
-        let visualEffectView = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight))
-        visualEffectView.material = .hudWindow
-        visualEffectView.blendingMode = .behindWindow
-        visualEffectView.state = .active
-        visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 16
-        visualEffectView.layer?.masksToBounds = true
-
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight))
-
-        // Header with gradient background
-        let headerView = NSView(frame: NSRect(x: 0, y: windowHeight - 140, width: windowWidth, height: 140))
-        headerView.wantsLayer = true
-
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.frame = headerView.bounds
-        gradientLayer.colors = [
-            NSColor.systemBlue.withAlphaComponent(0.3).cgColor,
-            NSColor.systemPurple.withAlphaComponent(0.2).cgColor
-        ]
-        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
-        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
-        headerView.layer?.addSublayer(gradientLayer)
-        contentView.addSubview(headerView)
-
-        // Calendar icon using SF Symbol
-        if let calendarImage = NSImage(systemSymbolName: "calendar.badge.clock", accessibilityDescription: nil) {
-            let iconView = NSImageView(image: calendarImage)
-            iconView.frame = NSRect(x: windowWidth/2 - 32, y: windowHeight - 110, width: 64, height: 64)
-            iconView.contentTintColor = .systemBlue
-            iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 64, weight: .regular)
-            contentView.addSubview(iconView)
-        }
-
-        // "Starting Soon" badge
-        let badgeView = NSView(frame: NSRect(x: windowWidth/2 - 80, y: windowHeight - 165, width: 160, height: 28))
-        badgeView.wantsLayer = true
-        badgeView.layer?.backgroundColor = NSColor.systemBlue.cgColor
-        badgeView.layer?.cornerRadius = 14
-
-        let minutesUntil = meeting.minutesUntilStart
-        let badgeText = minutesUntil <= 1 ? "Starting Now" : "Starting in \(minutesUntil) min"
-        let badgeLabel = NSTextField(labelWithString: badgeText)
-        badgeLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        badgeLabel.textColor = .white
-        badgeLabel.alignment = .center
-        badgeLabel.frame = NSRect(x: 0, y: 5, width: 160, height: 18)
-        badgeView.addSubview(badgeLabel)
-        contentView.addSubview(badgeView)
-
-        // Meeting time with clock icon
-        let timeContainer = NSView(frame: NSRect(x: 40, y: windowHeight - 220, width: windowWidth - 80, height: 40))
-
-        if let clockImage = NSImage(systemSymbolName: "clock.fill", accessibilityDescription: nil) {
-            let clockIcon = NSImageView(image: clockImage)
-            clockIcon.frame = NSRect(x: timeContainer.bounds.width/2 - 60, y: 8, width: 24, height: 24)
-            clockIcon.contentTintColor = .secondaryLabelColor
-            clockIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
-            timeContainer.addSubview(clockIcon)
-        }
-
-        let timeLabel = NSTextField(labelWithString: mediumTimeFormatter.string(from: meeting.startDate))
-        timeLabel.font = NSFont.monospacedSystemFont(ofSize: 28, weight: .semibold)
-        timeLabel.alignment = .center
-        timeLabel.frame = NSRect(x: timeContainer.bounds.width/2 - 25, y: 0, width: 200, height: 40)
-        timeContainer.addSubview(timeLabel)
-        contentView.addSubview(timeContainer)
-
-        // Meeting title with subtle background
-        let titleContainer = NSView(frame: NSRect(x: 30, y: windowHeight - 310, width: windowWidth - 60, height: 80))
-        titleContainer.wantsLayer = true
-        titleContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
-        titleContainer.layer?.cornerRadius = 12
-
-        let titleLabel = NSTextField(labelWithString: meeting.title)
-        titleLabel.font = NSFont.systemFont(ofSize: 22, weight: .medium)
-        titleLabel.alignment = .center
-        titleLabel.lineBreakMode = .byWordWrapping
-        titleLabel.maximumNumberOfLines = 2
-        titleLabel.frame = NSRect(x: 15, y: 15, width: titleContainer.bounds.width - 30, height: 50)
-        titleContainer.addSubview(titleLabel)
-        contentView.addSubview(titleContainer)
-
-        // Duration with icon
-        let duration = meeting.durationInMinutes
-        let durationStr = duration >= 60 ? "\(duration / 60)h \(duration % 60)m" : "\(duration)m"
-
-        let durationContainer = NSView(frame: NSRect(x: windowWidth/2 - 80, y: windowHeight - 355, width: 160, height: 30))
-
-        if let timerImage = NSImage(systemSymbolName: "hourglass", accessibilityDescription: nil) {
-            let timerIcon = NSImageView(image: timerImage)
-            timerIcon.frame = NSRect(x: 30, y: 5, width: 20, height: 20)
-            timerIcon.contentTintColor = .tertiaryLabelColor
-            timerIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
-            durationContainer.addSubview(timerIcon)
-        }
-
-        let durationLabel = NSTextField(labelWithString: durationStr)
-        durationLabel.font = NSFont.systemFont(ofSize: 16, weight: .medium)
-        durationLabel.alignment = .center
-        durationLabel.textColor = .secondaryLabelColor
-        durationLabel.frame = NSRect(x: 55, y: 5, width: 80, height: 22)
-        durationContainer.addSubview(durationLabel)
-        contentView.addSubview(durationContainer)
-
-        // Participants section with improved layout
-        var currentY: CGFloat = windowHeight - 400
-        if !meeting.attendees.isEmpty {
-            let participantsContainer = NSView(frame: NSRect(x: 30, y: currentY - 90, width: windowWidth - 60, height: 90))
-            participantsContainer.wantsLayer = true
-            participantsContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.3).cgColor
-            participantsContainer.layer?.cornerRadius = 10
-
-            if let peopleImage = NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil) {
-                let peopleIcon = NSImageView(image: peopleImage)
-                peopleIcon.frame = NSRect(x: 12, y: 58, width: 24, height: 24)
-                peopleIcon.contentTintColor = .systemBlue
-                peopleIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
-                participantsContainer.addSubview(peopleIcon)
-            }
-
-            let participantsTitle = NSTextField(labelWithString: "Participants")
-            participantsTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-            participantsTitle.textColor = .secondaryLabelColor
-            participantsTitle.frame = NSRect(x: 42, y: 62, width: participantsContainer.bounds.width - 54, height: 18)
-            participantsContainer.addSubview(participantsTitle)
-
-            let participantsText = meeting.attendees.prefix(5).joined(separator: ", ") + (meeting.attendees.count > 5 ? " +\(meeting.attendees.count - 5) more" : "")
-            let participantsField = NSTextField(wrappingLabelWithString: participantsText)
-            participantsField.font = NSFont.systemFont(ofSize: 13)
-            participantsField.textColor = .labelColor
-            participantsField.maximumNumberOfLines = 2
-            participantsField.lineBreakMode = .byTruncatingTail
-            participantsField.frame = NSRect(x: 12, y: 10, width: participantsContainer.bounds.width - 24, height: 45)
-            participantsContainer.addSubview(participantsField)
-
-            contentView.addSubview(participantsContainer)
-            currentY -= 100
-        }
-
-        // Action buttons at the bottom
-        let buttonY: CGFloat = 20
-        let buttonWidth: CGFloat = 180
-        let buttonHeight: CGFloat = 44
-
-        if let meetingURL = meeting.url {
-            // Join button (primary action)
-            let joinButton = NSButton(frame: NSRect(x: windowWidth/2 - buttonWidth - 10, y: buttonY, width: buttonWidth, height: buttonHeight))
-            joinButton.title = "Join Meeting"
-            joinButton.bezelStyle = .rounded
-            joinButton.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-            joinButton.contentTintColor = .white
-            joinButton.isBordered = true
-            joinButton.wantsLayer = true
-            joinButton.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            joinButton.layer?.cornerRadius = 10
-
-            let joinAction = {
-                NSWorkspace.shared.open(meetingURL)
-                window.close()
-            }
-
-            joinButton.target = self
-            joinButton.action = #selector(dismissMeetingAlert)
-
-            // Store the action
-            objc_setAssociatedObject(joinButton, "joinAction", joinAction as Any, .OBJC_ASSOCIATION_RETAIN)
-
-            // Override the action to call our closure
-            let originalAction = joinButton.action
-            joinButton.action = #selector(executeJoinAction(_:))
-
-            contentView.addSubview(joinButton)
-
-            // Dismiss button
-            let dismissButton = NSButton(frame: NSRect(x: windowWidth/2 + 10, y: buttonY, width: buttonWidth, height: buttonHeight))
-            dismissButton.title = "Dismiss"
-            dismissButton.bezelStyle = .rounded
-            dismissButton.font = NSFont.systemFont(ofSize: 15, weight: .medium)
-            dismissButton.target = self
-            dismissButton.action = #selector(dismissMeetingAlert)
-            dismissButton.wantsLayer = true
-            dismissButton.layer?.cornerRadius = 10
-            dismissButton.layer?.borderWidth = 1
-            dismissButton.layer?.borderColor = NSColor.separatorColor.cgColor
-            contentView.addSubview(dismissButton)
-        } else {
-            // Just a dismiss button centered
-            let dismissButton = NSButton(frame: NSRect(x: windowWidth/2 - buttonWidth/2, y: buttonY, width: buttonWidth, height: buttonHeight))
-            dismissButton.title = "OK"
-            dismissButton.bezelStyle = .rounded
-            dismissButton.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-            dismissButton.target = self
-            dismissButton.action = #selector(dismissMeetingAlert)
-            dismissButton.wantsLayer = true
-            dismissButton.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            dismissButton.layer?.cornerRadius = 10
-            dismissButton.contentTintColor = .white
-            contentView.addSubview(dismissButton)
-        }
-
-        visualEffectView.addSubview(contentView)
-        window.contentView = visualEffectView
         window.center()
-
-        // Animate window appearance
         window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
-
-        NSAnimationContext.runAnimationGroup({ context in
+        NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1.0
-        })
-
+        }
         NSApp.activate(ignoringOtherApps: true)
 
-        // Store window reference
         self.meetingAlertWindow = window
+    }
+
+    /// Builds the panel's whole view tree, ground included, so it can be rebuilt in place
+    /// when the attendee list expands.
+    private func alertContent(for meeting: Meeting) -> NSView {
+        let root = NSStackView()
+        root.orientation = .vertical
+        root.alignment = .leading
+        root.spacing = 0
+        root.translatesAutoresizingMaskIntoConstraints = false
+
+        addFullWidth(alertHeader(for: meeting), to: root)
+
+        let body = NSStackView()
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.spacing = 14
+        body.translatesAutoresizingMaskIntoConstraints = false
+
+        if let url = meeting.url {
+            addFullWidth(alertVideoCard(url: url), to: body)
+        }
+        if let location = meeting.location {
+            addFullWidth(alertLocationCard(location), to: body)
+        }
+        if !meeting.participants.isEmpty {
+            addFullWidth(alertAttendeesSection(for: meeting), to: body)
+        }
+        // Nothing but the header - keep the ground from collapsing onto the footer.
+        let bodyBottom: CGFloat = body.arrangedSubviews.isEmpty ? 4 : 12
+        addFullWidth(padded(body, NSEdgeInsets(top: 0, left: 16, bottom: bodyBottom, right: 16)), to: root)
+
+        addFullWidth(alertHairline(), to: root)
+        addFullWidth(alertFooter(for: meeting), to: root)
+
+        // The design's grouped-inset pattern needs a window-grey ground for the cards to
+        // sit on; without painting it the window draws white and the cards vanish into it.
+        let ground = AlertBackgroundView()
+        ground.wantsLayer = true
+        ground.fill = Self.alertGround
+        ground.translatesAutoresizingMaskIntoConstraints = false
+        ground.addSubview(root)
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: Self.alertPanelWidth),
+            root.leadingAnchor.constraint(equalTo: ground.leadingAnchor),
+            root.trailingAnchor.constraint(equalTo: ground.trailingAnchor),
+            root.topAnchor.constraint(equalTo: ground.topAnchor),
+            root.bottomAnchor.constraint(equalTo: ground.bottomAnchor)
+        ])
+        return ground
+    }
+
+    /// Expands or collapses the attendee card, rebuilding the panel around the new list
+    /// and growing the window downward so its title stays where the reader left it.
+    @objc func toggleShowAllAttendees() {
+        guard let window = meetingAlertWindow, let meeting = alertPanelMeeting else { return }
+        alertShowsAllAttendees.toggle()
+
+        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        let ground = alertContent(for: meeting)
+        window.contentView = ground
+        ground.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: Self.alertPanelWidth, height: ground.fittingSize.height))
+        window.setFrameTopLeftPoint(topLeft)
+    }
+
+    /// Lays a transparent button over `view` so a whole composed row is clickable.
+    private func clickable(_ view: NSView, action: Selector) -> NSView {
+        let button = NSButton(title: "", target: self, action: action)
+        button.isTransparent = true
+        button.isBordered = false
+        button.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            button.topAnchor.constraint(equalTo: view.topAnchor),
+            button.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        return view
+    }
+
+    /// App mark, title, the time/duration/calendar line, and the countdown pill.
+    private func alertHeader(for meeting: Meeting) -> NSView {
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 52),
+            icon.heightAnchor.constraint(equalToConstant: 52)
+        ])
+
+        let title = NSTextField(labelWithString: meeting.title)
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 2
+        title.preferredMaxLayoutWidth = Self.alertPanelWidth - 16 - 52 - 14 - 16
+
+        var parts = ["\(timeFormatter.string(from: meeting.startDate)) – \(timeFormatter.string(from: meeting.endDate))"]
+        let minutes = meeting.durationInMinutes
+        parts.append(minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes) min")
+        if !meeting.calendarTitle.isEmpty { parts.append(meeting.calendarTitle) }
+        let subtitle = NSTextField(labelWithString: parts.joined(separator: " · "))
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.textColor = .secondaryLabelColor
+        subtitle.lineBreakMode = .byTruncatingTail
+
+        let text = NSStackView(views: [title, subtitle, alertCountdownPill(for: meeting)])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 5
+        text.setCustomSpacing(8, after: subtitle)
+
+        let row = NSStackView(views: [icon, text])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 14
+        return padded(row, NSEdgeInsets(top: 18, left: 16, bottom: 16, right: 16))
+    }
+
+    /// The one red element: it is what changes as the meeting approaches.
+    private func alertCountdownPill(for meeting: Meeting) -> NSView {
+        let minutes = meeting.minutesUntilStart
+        let label = NSTextField(labelWithString: minutes <= 1 ? "Starting Now" : "Starting in \(minutes) min")
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let pill = AlertBackgroundView()
+        pill.wantsLayer = true
+        pill.fill = .systemRed
+        pill.cornerRadius = 10
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(label)
+        NSLayoutConstraint.activate([
+            pill.heightAnchor.constraint(equalToConstant: 20),
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 9),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -9),
+            label.centerYAnchor.constraint(equalTo: pill.centerYAnchor)
+        ])
+        return pill
+    }
+
+    private func alertVideoCard(url: URL) -> NSView {
+        let name = NSTextField(labelWithString: "Video call")
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let detail = NSTextField(labelWithString: alertShortLink(url))
+        detail.font = .systemFont(ofSize: 12)
+        detail.textColor = .secondaryLabelColor
+        detail.lineBreakMode = .byTruncatingTail
+
+        let text = NSStackView(views: [name, detail])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 1
+
+        // The card states which call this is; joining is the footer's default button, so
+        // that Return has one unambiguous target rather than two identical Join buttons.
+        return alertCard(padded(text, NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)))
+    }
+
+    private func alertLocationCard(_ location: String) -> NSView {
+        let name = NSTextField(labelWithString: "Location")
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let detail = NSTextField(labelWithString: location)
+        detail.font = .systemFont(ofSize: 12)
+        detail.textColor = .secondaryLabelColor
+        detail.lineBreakMode = .byTruncatingTail
+
+        let text = NSStackView(views: [name, detail])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 1
+        return alertCard(padded(text, NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)))
+    }
+
+    /// Section label plus the RSVP tally, over a card of attendee rows.
+    private func alertAttendeesSection(for meeting: Meeting) -> NSView {
+        let heading = NSTextField(labelWithString: "ATTENDEES")
+        heading.font = .systemFont(ofSize: 11, weight: .semibold)
+        heading.textColor = .secondaryLabelColor
+
+        var tallies: [String] = []
+        let accepted = meeting.participants.filter { $0.rsvp == .accepted }.count
+        let declined = meeting.participants.filter { $0.rsvp == .declined }.count
+        let pending = meeting.participants.filter { $0.rsvp == .pending || $0.rsvp == .tentative }.count
+        if accepted > 0 { tallies.append("\(accepted) yes") }
+        if declined > 0 { tallies.append("\(declined) no") }
+        if pending > 0 { tallies.append("\(pending) pending") }
+        let tally = NSTextField(labelWithString: tallies.joined(separator: " · "))
+        tally.font = .systemFont(ofSize: 11)
+        tally.textColor = .secondaryLabelColor
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let headingRow = NSStackView(views: [heading, spacer, tally])
+        headingRow.orientation = .horizontal
+        headingRow.alignment = .firstBaseline
+        headingRow.spacing = 12
+
+        let rows = NSStackView()
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 0
+
+        // Organiser first, then people who accepted - the order the design shows and the
+        // order that answers "is this meeting actually happening" fastest.
+        let ordered = meeting.participants.sorted { lhs, rhs in
+            if lhs.isOrganizer != rhs.isOrganizer { return lhs.isOrganizer }
+            if (lhs.rsvp == .accepted) != (rhs.rsvp == .accepted) { return lhs.rsvp == .accepted }
+            // Swift's sort is not stable, so break ties by name - otherwise the same
+            // meeting lists its attendees in a different order each time it alerts.
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        let collapsedLimit = 4
+        let shown = alertShowsAllAttendees ? ordered : Array(ordered.prefix(collapsedLimit))
+        for person in shown {
+            addFullWidth(alertAttendeeRow(person), to: rows)
+        }
+
+        // The disclosure row only earns its place when there is something behind it.
+        if ordered.count > collapsedLimit {
+            addFullWidth(padded(alertHairline(), NSEdgeInsets(top: 0, left: 54, bottom: 0, right: 0)), to: rows)
+
+            let remaining = ordered.count - collapsedLimit
+            let more = NSTextField(labelWithString: alertShowsAllAttendees ? "Show fewer" : "Show all \(ordered.count)")
+            more.font = .systemFont(ofSize: 13)
+            more.textColor = .controlAccentColor
+            more.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+            let chevron = NSTextField(labelWithString: alertShowsAllAttendees ? "\u{2039}" : "\u{203A}")
+            chevron.font = .systemFont(ofSize: 15)
+            chevron.textColor = .tertiaryLabelColor
+
+            let badge = alertShowsAllAttendees ? "\u{2212}" : "+\(remaining)"
+            let moreRow = NSStackView(views: [alertAvatar(badge, muted: true), more, alertSpacer(), chevron])
+            moreRow.orientation = .horizontal
+            moreRow.alignment = .centerY
+            moreRow.spacing = 10
+            let padded = padded(moreRow, NSEdgeInsets(top: 7, left: 14, bottom: 7, right: 14))
+            addFullWidth(clickable(padded, action: #selector(toggleShowAllAttendees)), to: rows)
+        }
+
+        let section = NSStackView()
+        section.orientation = .vertical
+        section.alignment = .leading
+        section.spacing = 6
+        addFullWidth(padded(headingRow, NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)), to: section)
+        addFullWidth(alertCard(rows), to: section)
+        return section
+    }
+
+    private func alertAttendeeRow(_ person: Participant) -> NSView {
+        let name = NSTextField(labelWithString: person.name)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.lineBreakMode = .byTruncatingTail
+
+        let text = NSStackView(views: [name])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 0
+        if person.isOrganizer {
+            let role = NSTextField(labelWithString: "Organiser")
+            role.font = .systemFont(ofSize: 11)
+            role.textColor = .secondaryLabelColor
+            text.addArrangedSubview(role)
+        }
+
+        let state: String
+        switch person.rsvp {
+        case .accepted: state = "Yes"
+        case .declined: state = "No"
+        case .tentative: state = "Maybe"
+        case .pending: state = "No reply"
+        }
+        let stateLabel = NSTextField(labelWithString: state)
+        stateLabel.font = .systemFont(ofSize: 12)
+        stateLabel.textColor = .secondaryLabelColor
+        stateLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        text.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        let row = NSStackView(views: [alertAvatar(person.initials, muted: false), text, alertSpacer(), stateLabel])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return padded(row, NSEdgeInsets(top: 7, left: 14, bottom: 7, right: 14))
+    }
+
+    private func alertAvatar(_ text: String, muted: Bool) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = muted ? .secondaryLabelColor : .white
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let circle = AlertBackgroundView()
+        circle.wantsLayer = true
+        circle.fill = muted ? .quaternaryLabelColor : .systemGray
+        circle.cornerRadius = 15
+        circle.translatesAutoresizingMaskIntoConstraints = false
+        circle.addSubview(label)
+        NSLayoutConstraint.activate([
+            circle.widthAnchor.constraint(equalToConstant: 30),
+            circle.heightAnchor.constraint(equalToConstant: 30),
+            label.centerXAnchor.constraint(equalTo: circle.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: circle.centerYAnchor)
+        ])
+        return circle
+    }
+
+    private func alertFooter(for meeting: Meeting) -> NSView {
+        let snoozeMinutes = max(1, Int((alertSnoozeDelay(for: meeting) / 60).rounded()))
+        let snooze = NSButton(title: "Snooze \(snoozeMinutes) min", target: self, action: #selector(snoozeMeetingAlert))
+        snooze.bezelStyle = .rounded
+        snooze.font = .systemFont(ofSize: 13)
+
+        let primary: NSButton
+        if meeting.url != nil {
+            primary = alertAccentButton(title: "Join", action: #selector(joinFromAlert))
+        } else {
+            primary = alertAccentButton(title: "Dismiss", action: #selector(dismissMeetingAlert))
+        }
+        // Making it the default button is what binds Return to it.
+        primary.keyEquivalent = enterToJoinEnabled ? "\r" : ""
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [spacer, snooze, primary])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return padded(row, NSEdgeInsets(top: 12, left: 16, bottom: 16, right: 16))
+    }
+
+    private func alertAccentButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        button.bezelColor = .controlAccentColor
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold)
+        ])
+        return button
+    }
+
+    private func alertCard(_ content: NSView) -> NSView {
+        let card = AlertBackgroundView()
+        card.wantsLayer = true
+        card.fill = .textBackgroundColor
+        card.stroke = .separatorColor
+        card.cornerRadius = 10
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            content.topAnchor.constraint(equalTo: card.topAnchor),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        ])
+        return card
+    }
+
+    private func alertHairline() -> NSView {
+        let line = AlertBackgroundView()
+        line.wantsLayer = true
+        line.fill = .separatorColor
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return line
+    }
+
+    /// Trims the scheme and any trailing slash so the link reads like the design's
+    /// "meet.internal/qtr-planning" rather than a full URL.
+    private func alertShortLink(_ url: URL) -> String {
+        var text = url.absoluteString
+        for prefix in ["https://", "http://"] where text.hasPrefix(prefix) {
+            text = String(text.dropFirst(prefix.count))
+        }
+        if text.hasSuffix("/") { text = String(text.dropLast()) }
+        return text
+    }
+
+    @objc func joinFromAlert() {
+        if let url = alertPanelMeeting?.url {
+            NSWorkspace.shared.open(url)
+        }
+        dismissMeetingAlert()
+    }
+
+    /// How long Snooze delays the panel: long enough to get out of the way, but back
+    /// about a minute before the meeting starts. A fixed five minutes would always land
+    /// after the start, since the panel only appears three minutes ahead of it - the
+    /// button would defer the reminder past the thing it is reminding you about. Once the
+    /// meeting has begun there is no start left to beat, so five minutes it is.
+    private func alertSnoozeDelay(for meeting: Meeting) -> TimeInterval {
+        let beforeStart = meeting.startDate.timeIntervalSinceNow - 60
+        return beforeStart >= 30 ? beforeStart : 5 * 60
+    }
+
+    @objc func snoozeMeetingAlert() {
+        guard let meeting = alertPanelMeeting else { return }
+        let delay = alertSnoozeDelay(for: meeting)
+        dismissMeetingAlert()
+        snoozeTimer?.invalidate()
+        snoozeTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.showMeetingAlert(for: meeting)
+        }
     }
 
     @objc func executeJoinAction(_ sender: NSButton) {
@@ -872,7 +1196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Create settings window
         let windowWidth: CGFloat = 400
-        let windowHeight: CGFloat = 310
+        let windowHeight: CGFloat = 440
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
             styleMask: [.titled, .closable],
@@ -923,6 +1247,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         scrollingCheckbox.state = scrollingEnabled ? .on : .off
         contentView.addSubview(scrollingCheckbox)
 
+        // Meeting alert section
+        yPosition -= 20
+        let alertSeparator = NSBox(frame: NSRect(x: 20, y: yPosition, width: windowWidth - 40, height: 1))
+        alertSeparator.boxType = .separator
+        contentView.addSubview(alertSeparator)
+
+        yPosition -= 30
+        let alertLabel = NSTextField(labelWithString: "Meeting Alert")
+        alertLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
+        alertLabel.frame = NSRect(x: 20, y: yPosition, width: windowWidth - 40, height: 24)
+        contentView.addSubview(alertLabel)
+
+        yPosition -= 30
+        let enterCheckbox = NSButton(checkboxWithTitle: "Press Return to join the meeting",
+                                     target: self, action: #selector(toggleEnterToJoin(_:)))
+        enterCheckbox.frame = NSRect(x: 30, y: yPosition, width: windowWidth - 60, height: 24)
+        enterCheckbox.state = enterToJoinEnabled ? .on : .off
+        contentView.addSubview(enterCheckbox)
+
         // Close button
         let closeButton = NSButton(frame: NSRect(x: windowWidth - 90, y: 20, width: 70, height: 32))
         closeButton.title = "Close"
@@ -949,6 +1292,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc func toggleEnterToJoin(_ sender: NSButton) {
+        enterToJoinEnabled = (sender.state == .on)
     }
 
     @objc func toggleScrolling(_ sender: NSButton) {

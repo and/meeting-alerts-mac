@@ -2,6 +2,14 @@
 
 A lightweight macOS menu bar application that displays your upcoming calendar meetings with real-time updates and smart notifications.
 
+<p align="center">
+  <img src="docs/meeting-alert.png" alt="The Meeting Alert panel, showing a meeting's time, video call link, location and attendees" width="420">
+</p>
+
+The alert panel appears on its own three minutes before a meeting starts. Sections
+appear only when the event carries that information, so a bare meeting shows just the
+header and the buttons.
+
 ## Features
 
 - **Menu Bar Display**: Shows upcoming meetings directly in your macOS menu bar
@@ -10,7 +18,10 @@ A lightweight macOS menu bar application that displays your upcoming calendar me
   - Refreshes every 30 seconds
   - Detects calendar changes immediately
   - Updates when system wakes from sleep
-- **Meeting Alerts**: Half-screen popup notification 2 minutes before meetings start
+- **Meeting Alerts**: Floating panel that appears 3 minutes before a meeting starts, once per meeting
+- **Snooze**: Brings the panel back about a minute before the meeting starts, or in 5 minutes if it has already begun — the button's label states the actual interval
+- **Expandable Attendees**: The first four are listed with their RSVP; "Show all" expands the rest
+- **Press Return to Join**: Return activates Join while the panel is focused (can be turned off in Settings)
 - **Video Conference Integration**: Automatically detects and displays links for Zoom, Google Meet, Microsoft Teams, and Webex
 - **Customizable Display**: Four display format options
 - **Smooth Scrolling**: Optional text scrolling animation on hover (3 characters per second), off by default
@@ -76,6 +87,10 @@ Access settings from the menu to configure:
    - Just the upcoming meeting time
 
 2. **Scrolling Animation**: Enable/disable text scrolling on hover (disabled by default)
+
+3. **Meeting Alert**: **Press Return to join the meeting** — when enabled (the default),
+   Return activates the alert panel's Join button while that window is focused. Turn it
+   off if you would rather Return did nothing there.
 
 ### Meeting Details
 

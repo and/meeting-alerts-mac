@@ -1,6 +1,27 @@
 import Foundation
 import EventKit
 
+/// A person invited to a meeting, with how they replied.
+struct Participant {
+    enum RSVP {
+        case accepted, declined, tentative, pending
+    }
+
+    let name: String
+    let rsvp: RSVP
+    let isOrganizer: Bool
+
+    /// Up to two letters for the avatar, taken from the name's word initials and
+    /// falling back to the first characters of a single-word name or address.
+    var initials: String {
+        let words = name.split(separator: " ").filter { !$0.isEmpty }
+        if words.count >= 2 {
+            return (words[0].prefix(1) + words[1].prefix(1)).uppercased()
+        }
+        return String(name.prefix(2)).uppercased()
+    }
+}
+
 struct Meeting {
     let title: String
     let startDate: Date
@@ -8,6 +29,9 @@ struct Meeting {
     let url: URL?
     let notes: String?
     let attendees: [String]
+    let calendarTitle: String
+    let location: String?
+    let participants: [Participant]
 
     @inline(__always)
     var isActive: Bool {
@@ -190,7 +214,35 @@ class CalendarManager {
                 }
             } ?? []
 
-            return Meeting(title: event.title ?? "Untitled", startDate: start, endDate: end, url: videoURL, notes: event.notes, attendees: attendeeNames)
+            let organizerName = event.organizer?.name
+            let participants = event.attendees?.compactMap { attendee -> Participant? in
+                let name: String
+                if let attendeeName = attendee.name, !attendeeName.isEmpty {
+                    name = attendeeName
+                } else {
+                    let email = attendee.url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
+                    guard !email.isEmpty else { return nil }
+                    name = email
+                }
+
+                let rsvp: Participant.RSVP
+                switch attendee.participantStatus {
+                case .accepted: rsvp = .accepted
+                case .declined: rsvp = .declined
+                case .tentative: rsvp = .tentative
+                default: rsvp = .pending
+                }
+
+                return Participant(name: name, rsvp: rsvp,
+                                   isOrganizer: organizerName != nil && name == organizerName)
+            } ?? []
+
+            let location = event.location.flatMap { $0.isEmpty ? nil : $0 }
+
+            return Meeting(title: event.title ?? "Untitled", startDate: start, endDate: end,
+                           url: videoURL, notes: event.notes, attendees: attendeeNames,
+                           calendarTitle: event.calendar?.title ?? "", location: location,
+                           participants: participants)
         }
 
         let sortedMeetings = meetings.sorted { $0.startDate < $1.startDate }
