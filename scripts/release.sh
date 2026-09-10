@@ -15,8 +15,8 @@ set -euo pipefail
 
 APP_NAME="MeetingsAlert"
 BUNDLE_ID="com.meetingsalert.app"
-MARKETING_VERSION="1.1.1"
-BUILD_VERSION="3"
+MARKETING_VERSION="1.1.2"
+BUILD_VERSION="4"
 DEPLOYMENT_TARGET="13.0"
 SIGN_IDENTITY="Developer ID Application: Anand Hrushikesh (RLVYQT69D4)"
 NOTARY_PROFILE="MeetingsAlertNotary"

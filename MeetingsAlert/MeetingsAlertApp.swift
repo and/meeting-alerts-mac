@@ -165,7 +165,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var scrollingEnabled: Bool {
         get {
-            UserDefaults.standard.object(forKey: "scrollingEnabled") as? Bool ?? true
+            // Off by default; the reader opts in from Settings. Anyone who has already
+            // toggled it keeps their choice, since only an absent key falls back here.
+            UserDefaults.standard.object(forKey: "scrollingEnabled") as? Bool ?? false
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "scrollingEnabled")
