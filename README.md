@@ -13,7 +13,7 @@ A lightweight macOS menu bar application that displays your upcoming calendar me
 - **Meeting Alerts**: Half-screen popup notification 2 minutes before meetings start
 - **Video Conference Integration**: Automatically detects and displays links for Zoom, Google Meet, Microsoft Teams, and Webex
 - **Customizable Display**: Four display format options
-- **Smooth Scrolling**: Optional text scrolling animation on hover (3 characters per second)
+- **Smooth Scrolling**: Optional text scrolling animation on hover (3 characters per second), off by default
 - **Instant Tooltips**: Shows full meeting details on hover without delay
 - **Multi-day Support**: Shows meetings from today and tomorrow
 - **Launch at Login**: Optional automatic startup
@@ -75,7 +75,7 @@ Access settings from the menu to configure:
    - Upcoming meeting time + Title
    - Just the upcoming meeting time
 
-2. **Scrolling Animation**: Enable/disable text scrolling on hover
+2. **Scrolling Animation**: Enable/disable text scrolling on hover (disabled by default)
 
 ### Meeting Details
 
