@@ -58,44 +58,44 @@ class CalendarManager {
     }
 
     @objc private func calendarChanged() {
-        print("📅 Calendar database changed - events updated externally")
+        debugLog("📅 Calendar database changed - events updated externally")
         onCalendarChanged?()
     }
 
     func requestAccess(completion: @escaping (Bool) -> Void) {
         if #available(macOS 14.0, *) {
             let status = EKEventStore.authorizationStatus(for: .event)
-            print("📋 Current authorization status: \(status.rawValue)")
+            debugLog("📋 Current authorization status: \(status.rawValue)")
 
             switch status {
             case .fullAccess:
-                print("✅ Already have full access")
+                debugLog("✅ Already have full access")
                 self.hasAccess = true
                 completion(true)
             case .writeOnly:
-                print("⚠️ Have write-only access (cannot read events)")
+                debugLog("⚠️ Have write-only access (cannot read events)")
                 self.hasAccess = false
                 completion(false)
             case .notDetermined:
-                print("❓ Permission not determined, requesting full access...")
+                debugLog("❓ Permission not determined, requesting full access...")
                 eventStore.requestFullAccessToEvents { granted, error in
-                    print("📆 Permission granted: \(granted)")
+                    debugLog("📆 Permission granted: \(granted)")
                     self.hasAccess = granted
                     if let error = error {
-                        print("❌ Calendar access error: \(error.localizedDescription)")
+                        debugLog("❌ Calendar access error: \(error.localizedDescription)")
                     }
                     completion(granted)
                 }
             case .denied:
-                print("🚫 Permission denied by user")
+                debugLog("🚫 Permission denied by user")
                 self.hasAccess = false
                 completion(false)
             case .restricted:
-                print("🔒 Permission restricted by system policy")
+                debugLog("🔒 Permission restricted by system policy")
                 self.hasAccess = false
                 completion(false)
             @unknown default:
-                print("❓ Unknown authorization status")
+                debugLog("❓ Unknown authorization status")
                 self.hasAccess = false
                 completion(false)
             }
@@ -103,7 +103,7 @@ class CalendarManager {
             eventStore.requestAccess(to: .event) { granted, error in
                 self.hasAccess = granted
                 if let error = error {
-                    print("Calendar access error: \(error.localizedDescription)")
+                    debugLog("Calendar access error: \(error.localizedDescription)")
                 }
                 completion(granted)
             }
@@ -112,7 +112,7 @@ class CalendarManager {
 
     func getUpcomingMeetings() -> [Meeting] {
         guard hasAccess else {
-            print("❌ No calendar access")
+            debugLog("❌ No calendar access")
             return []
         }
 
@@ -122,21 +122,21 @@ class CalendarManager {
         let startOfDay = Calendar.current.startOfDay(for: now)
         let endOfTomorrow = Calendar.current.date(byAdding: .day, value: 2, to: startOfDay) ?? now
 
-        print("🔍 Searching for events from \(startOfDay) to \(endOfTomorrow)")
+        debugLog("🔍 Searching for events from \(startOfDay) to \(endOfTomorrow)")
 
         // Get all available calendars
         let calendars = eventStore.calendars(for: .event)
-        print("📚 Available calendars: \(calendars.count)")
+        debugLog("📚 Available calendars: \(calendars.count)")
         for cal in calendars {
-            print("  Calendar: \(cal.title) - Type: \(cal.type.rawValue)")
+            debugLog("  Calendar: \(cal.title) - Type: \(cal.type.rawValue)")
         }
 
         let predicate = eventStore.predicateForEvents(withStart: startOfDay, end: endOfTomorrow, calendars: nil)
         let events = eventStore.events(matching: predicate)
 
-        print("📅 Found \(events.count) total events in calendar")
+        debugLog("📅 Found \(events.count) total events in calendar")
         for event in events {
-            print("  Event: \(event.title ?? "Untitled") - Start: \(event.startDate ?? Date()) - End: \(event.endDate ?? Date()) - AllDay: \(event.isAllDay) - Calendar: \(event.calendar?.title ?? "Unknown")")
+            debugLog("  Event: \(event.title ?? "Untitled") - Start: \(event.startDate ?? Date()) - End: \(event.endDate ?? Date()) - AllDay: \(event.isAllDay) - Calendar: \(event.calendar?.title ?? "Unknown")")
         }
 
         let meetings = events.compactMap { event -> Meeting? in
@@ -146,7 +146,7 @@ class CalendarManager {
 
             // Only include meetings that haven't ended yet
             guard end > now else {
-                print("⏭️ Skipping ended meeting: \(event.title ?? "Untitled") (ended at \(end))")
+                debugLog("⏭️ Skipping ended meeting: \(event.title ?? "Untitled") (ended at \(end))")
                 return nil
             }
 
@@ -195,7 +195,7 @@ class CalendarManager {
 
         let sortedMeetings = meetings.sorted { $0.startDate < $1.startDate }
 
-        print("📊 Returning \(sortedMeetings.count) valid meetings")
+        debugLog("📊 Returning \(sortedMeetings.count) valid meetings")
 
         return sortedMeetings
     }

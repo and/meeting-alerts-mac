@@ -193,11 +193,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("🚀 MeetingsAlert: Application starting...")
+        debugLog("🚀 MeetingsAlert: Application starting...")
 
         let fixedWidth: CGFloat = 80
         statusItem = NSStatusBar.system.statusItem(withLength: fixedWidth)
-        print("📊 Status item created: \(statusItem != nil)")
+        debugLog("📊 Status item created: \(statusItem != nil)")
 
         if let button = statusItem?.button {
             // Use SF Symbol for calendar icon
@@ -215,9 +215,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = "Load..."
             button.cell?.truncatesLastVisibleLine = true
             button.cell?.lineBreakMode = .byTruncatingTail
-            print("✅ Button title set to: \(button.title)")
+            debugLog("✅ Button title set to: \(button.title)")
         } else {
-            print("❌ Failed to get status item button!")
+            debugLog("❌ Failed to get status item button!")
         }
 
         // Register for wake from sleep notifications
@@ -232,13 +232,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up calendar change callback
         calendarManager?.onCalendarChanged = { [weak self] in
-            print("🔄 Calendar changed - refreshing meetings")
+            debugLog("🔄 Calendar changed - refreshing meetings")
             self?.updateMeetingStatus()
             self?.checkForMeetingAlerts()
         }
 
         calendarManager?.requestAccess { [weak self] granted in
-            print("📆 Calendar access granted: \(granted)")
+            debugLog("📆 Calendar access granted: \(granted)")
             if granted {
                 self?.updateMeetingStatus()
                 self?.checkForMeetingAlerts()
@@ -262,7 +262,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func receivedWakeNotification() {
-        print("💤 System woke from sleep - updating meetings immediately")
+        debugLog("💤 System woke from sleep - updating meetings immediately")
         updateMeetingStatus()
         checkForMeetingAlerts()
     }
@@ -410,37 +410,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func updateMeetingStatus() {
         guard let meetings = calendarManager?.getUpcomingMeetings() else {
-            print("⚠️ Could not get meetings")
-            // Show debug alert
-            let alert = NSAlert()
-            alert.messageText = "Debug: Could not get meetings"
-            alert.informativeText = "Calendar access may not be granted"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            debugLog("Could not get meetings")
             return
         }
 
-        print("📋 Found \(meetings.count) meetings")
+        debugLog("📋 Found \(meetings.count) meetings")
 
-        // Show debug alert with meeting count
-        let alert = NSAlert()
-        alert.messageText = "Debug: Found \(meetings.count) meetings"
-        if meetings.isEmpty {
-            alert.informativeText = "No meetings found in the calendar"
-        } else {
-            var details = ""
-            for (i, m) in meetings.prefix(3).enumerated() {
-                details += "\(i+1). \(m.title) at \(timeFormatter.string(from: m.startDate))\n"
-            }
-            alert.informativeText = details
-        }
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
         for (index, meeting) in meetings.enumerated() {
             let status = meeting.isActive ? "ACTIVE" : "upcoming in \(meeting.minutesUntilStart)m"
-            print("  [\(index)] \(timeFormatter.string(from: meeting.startDate)) - \(meeting.title) (\(status))")
+            debugLog("  [\(index)] \(timeFormatter.string(from: meeting.startDate)) - \(meeting.title) (\(status))")
         }
 
         DispatchQueue.main.async { [weak self] in
@@ -457,7 +435,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         let nextMeeting = meetings[1]
                         if nextMeeting.minutesUntilStart <= 30 {
                             displayMeeting = nextMeeting
-                            print("⏭️ Showing next meeting instead of active one (starts in \(nextMeeting.minutesUntilStart)m)")
+                            debugLog("⏭️ Showing next meeting instead of active one (starts in \(nextMeeting.minutesUntilStart)m)")
                         } else {
                             displayMeeting = firstMeeting
                         }
@@ -493,7 +471,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     case .upcomingTimeOnly:
                         displayTitle = "\(timeLeft) left"
                     }
-                    print("🟢 Active meeting: \(displayTitle)")
+                    debugLog("🟢 Active meeting: \(displayTitle)")
                 } else {
                     let minutesUntil = nextMeeting.minutesUntilStart
                     let duration = nextMeeting.durationInMinutes
@@ -515,7 +493,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     case .upcomingTimeOnly:
                         displayTitle = "in \(timeUntil)"
                     }
-                    print("⏰ Upcoming meeting: \(displayTitle)")
+                    debugLog("⏰ Upcoming meeting: \(displayTitle)")
                 }
 
                 self?.customButton?.tooltipText = tooltipTitle
@@ -524,7 +502,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 button.title = "None"
                 self?.customButton?.tooltipText = "No meetings"
-                print("ℹ️ No meetings found")
+                debugLog("ℹ️ No meetings found")
             }
         }
     }
@@ -581,13 +559,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 if enabled {
                     try SMAppService.mainApp.register()
-                    print("✅ Launch at login enabled")
+                    debugLog("✅ Launch at login enabled")
                 } else {
                     try SMAppService.mainApp.unregister()
-                    print("❌ Launch at login disabled")
+                    debugLog("❌ Launch at login disabled")
                 }
             } catch {
-                print("⚠️ Failed to update launch at login: \(error.localizedDescription)")
+                debugLog("⚠️ Failed to update launch at login: \(error.localizedDescription)")
                 showLoginItemError(error.localizedDescription)
             }
         } else {
