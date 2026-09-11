@@ -42,12 +42,12 @@ class MeetingAlertWindowDelegate: NSObject, NSWindowDelegate {
 }
 
 @main
-class MeetingsAlertApp: NSObject, NSApplicationDelegate {
+class MeetingAlertsApp: NSObject, NSApplicationDelegate {
     private var appDelegate: AppDelegate?
 
     static func main() {
         let app = NSApplication.shared
-        let delegate = MeetingsAlertApp()
+        let delegate = MeetingAlertsApp()
         app.delegate = delegate
         app.run()
     }
@@ -243,7 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        debugLog("🚀 MeetingsAlert: Application starting...")
+        debugLog("🚀 MeetingAlerts: Application starting...")
 
         let fixedWidth: CGFloat = 80
         statusItem = NSStatusBar.system.statusItem(withLength: fixedWidth)
@@ -561,16 +561,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Starts the 30-second refresh, which also drives the meeting alerts.
+    ///
+    /// This is called from the calendar-access callback, which on a first launch arrives on
+    /// a background XPC thread. Timer.scheduledTimer would register with *that* thread's
+    /// run loop - one that is never run - and a timer can only belong to one run loop, so
+    /// adding it to the main one afterwards does not rescue it. The result was no refresh
+    /// and no alerts at all until the app was restarted, on exactly the launch where the
+    /// user has just granted access. Build the timer unscheduled and hand it to the main
+    /// run loop instead.
     func startTimer() {
-        // Check meetings every 30 seconds for optimal balance of responsiveness and efficiency
-        timer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.startTimer() }
+            return
+        }
+
+        timer?.invalidate()
+        let refresh = Timer(timeInterval: 30.0, repeats: true) { [weak self] _ in
             self?.updateMeetingStatus()
             self?.checkForMeetingAlerts()
         }
         // Let the system batch this wakeup with work it was already doing. Nothing here
         // needs 30.000s precision, and an exact fire date keeps the CPU from idling.
-        timer?.tolerance = 5.0
-        RunLoop.main.add(timer!, forMode: .common)
+        refresh.tolerance = 5.0
+        // .common so it keeps firing while a menu is open.
+        RunLoop.main.add(refresh, forMode: .common)
+        timer = refresh
     }
 
     /// Shows the meeting alert panel once per meeting, shortly before it starts.
@@ -647,7 +663,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             // Fallback for older macOS versions
-            let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.meetingsalert.app"
+            let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.meetingalerts.app"
             if enabled {
                 SMLoginItemSetEnabled(bundleIdentifier as CFString, true)
             } else {
@@ -1254,7 +1270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         contentView.addSubview(alertSeparator)
 
         yPosition -= 30
-        let alertLabel = NSTextField(labelWithString: "Meeting Alert")
+        let alertLabel = NSTextField(labelWithString: "Meeting Alerts")
         alertLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
         alertLabel.frame = NSRect(x: 20, y: yPosition, width: windowWidth - 40, height: 24)
         contentView.addSubview(alertLabel)

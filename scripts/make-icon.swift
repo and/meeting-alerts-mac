@@ -1,4 +1,4 @@
-// Generates MeetingsAlert's app icon from the design handoff (direction 1c, "Next block").
+// Generates MeetingAlerts's app icon from the design handoff (direction 1c, "Next block").
 //
 // Every dimension is a fraction of the tile edge S, per the handoff's Geometry table,
 // so the artwork regenerates exactly at any raster size. Usage:

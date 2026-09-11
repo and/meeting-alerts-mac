@@ -28,7 +28,7 @@
 	<string>This app needs access to your calendars to display upcoming meetings in the menu bar.</string>
 	<key>SMAuthorizedClients</key>
 	<array>
-		<string>identifier "com.meetingsalert.app" and anchor apple generic</string>
+		<string>identifier "com.meetingalerts.app" and anchor apple generic</string>
 	</array>
 </dict>
 </plist>

@@ -1,302 +1,119 @@
-# MeetingsAlert
+# Meeting Alerts
 
-A lightweight macOS menu bar application that displays your upcoming calendar meetings with real-time updates and smart notifications.
+A lightweight macOS menu bar app that keeps your next meeting in front of you, and puts a
+panel on screen shortly before it starts so you don't miss it.
 
 <p align="center">
-  <img src="docs/meeting-alert.png" alt="The Meeting Alert panel, showing a meeting's time, video call link, location and attendees" width="420">
+  <img src="docs/meeting-alert.png" alt="The Meeting Alerts panel showing a meeting's time, video call link, location and attendees" width="420">
 </p>
 
-The alert panel appears on its own three minutes before a meeting starts. Sections
-appear only when the event carries that information, so a bare meeting shows just the
-header and the buttons.
+## Install
 
-## Features
-
-- **Menu Bar Display**: Shows upcoming meetings directly in your macOS menu bar
-- **Smart Meeting Selection**: Automatically switches between active and upcoming meetings based on timing
-- **Real-time Updates**:
-  - Refreshes every 30 seconds
-  - Detects calendar changes immediately
-  - Updates when system wakes from sleep
-- **Meeting Alerts**: Floating panel that appears 3 minutes before a meeting starts, once per meeting
-- **Snooze**: Brings the panel back about a minute before the meeting starts, or in 5 minutes if it has already begun — the button's label states the actual interval
-- **Expandable Attendees**: The first four are listed with their RSVP; "Show all" expands the rest
-- **Press Return to Join**: Return activates Join while the panel is focused (can be turned off in Settings)
-- **Video Conference Integration**: Automatically detects and displays links for Zoom, Google Meet, Microsoft Teams, and Webex
-- **Customizable Display**: Four display format options
-- **Smooth Scrolling**: Optional text scrolling animation on hover (3 characters per second), off by default
-- **Instant Tooltips**: Shows full meeting details on hover without delay
-- **Multi-day Support**: Shows meetings from today and tomorrow
-- **Launch at Login**: Optional automatic startup
-- **Memory Optimized**: Uses approximately 39MB of RAM
-- **Native macOS Design**: Uses SF Symbols and AppKit for native look and feel
-
-## Requirements
-
-- macOS 13.0 or later
-- Calendar access permission (Full Access on macOS 14+)
-
-## Installation
-
-1. Download `MeetingsAlert.dmg` from the
-   [latest release](https://github.com/and/meeting-alerts-mac/releases/latest)
-2. Open it and drag **MeetingsAlert** into your **Applications** folder
-3. Launch it from Applications (it must be run from Applications, not from the disk image)
-4. Grant calendar access when prompted — on macOS 14+ choose **Full Access**
-5. Quit and relaunch once after granting access; the app then appears in your menu bar
+1. Download `MeetingAlerts.dmg` from the [latest release](https://github.com/and/meeting-alerts-mac/releases/latest)
+2. Open it and drag **Meeting Alerts** into your **Applications** folder
+3. Launch it from Applications — it must run from there, not from the disk image
+4. Grant calendar access when prompted. On macOS 14 and later choose **Full Access**;
+   read-only is not enough to read event details
+5. Quit and relaunch once after granting access
 
 The app is signed with a Developer ID certificate and notarized by Apple, so it opens
-without any Gatekeeper warning. There is no Dock icon — it lives in the menu bar only.
+without a Gatekeeper warning. There is no Dock icon — it lives in the menu bar.
 
-## Usage
+**Requires macOS 13 (Ventura) or later.** Universal: Apple Silicon and Intel.
 
-### Menu Bar Display
+## What it does
 
-The menu bar shows your next meeting in a compact format. The exact display depends on your settings:
+**In the menu bar**, your next meeting, in the format you choose:
 
-- **Time + Title** (default): `10:00 AM Meeting Name (30m)`
-- **Title Only**: `Meeting Name`
-- **Upcoming Time + Title**: `in 15m Meeting Name (30m)`
-- **Upcoming Time Only**: `in 15m`
+| Format | Example |
+| --- | --- |
+| Time + title | `10:00 AM Design review (30m)` |
+| Title only | `Design review` |
+| Countdown + title | `in 15m Design review (30m)` |
+| Countdown only | `in 15m` |
 
-When a meeting is active, it shows time remaining: `10:00 AM Meeting Name (15m left)`
+Once a meeting is under way it counts down instead: `10:00 AM Design review (15m left)`.
+If a meeting is running and the next one starts within 30 minutes, the upcoming one takes
+over, on the grounds that it is the one you still have to act on.
 
-### Display Behavior
+**Click the icon** for your next three meetings, Settings, Launch at Login, Refresh and
+Quit. Clicking a meeting opens its video call if it has one.
 
-- If you have an active meeting and the next meeting starts within 30 minutes, the upcoming meeting is displayed
-- Otherwise, the currently active meeting is shown
-- Meetings are filtered to only show those that haven't ended
+**Hover the text** for a tooltip with the full title, times, duration, participants and
+the video link — useful when the title is too long for the menu bar.
 
-### Menu Items
+## The alert panel
 
-Click the menu bar icon to see:
+Three minutes before a meeting starts, a panel appears with everything you need to decide
+what to do. It shows only what your calendar actually holds, so a bare meeting shows just
+the header and the buttons.
 
-- **Next three meetings**: Clickable list of upcoming meetings (opens video conference link if available)
-- **Settings**: Configure display format and scrolling animation
-- **Launch at Login**: Toggle automatic startup
-- **Quit**: Exit the application
+- **Join** opens the video call. Press **Return** to trigger it without reaching for the
+  mouse
+- **Snooze** brings the panel back about a minute before the meeting starts, or in five
+  minutes if it has already begun. The button states the real interval, so you always know
+  what you are agreeing to
+- **Attendees** lists the first four with their RSVP; **Show all** expands the rest
 
-### Settings
+Each meeting alerts once. Dismissing it does not bring it back.
 
-Access settings from the menu to configure:
+Zoom, Google Meet, Microsoft Teams and Webex links are detected from the event's URL field
+or anywhere in its notes.
 
-1. **Display Format**:
-   - Just the title
-   - Time + Title
-   - Upcoming meeting time + Title
-   - Just the upcoming meeting time
+## Settings
 
-2. **Scrolling Animation**: Enable/disable text scrolling on hover (disabled by default)
+Open **Settings…** from the menu bar icon.
 
-3. **Meeting Alert**: **Press Return to join the meeting** — when enabled (the default),
-   Return activates the alert panel's Join button while that window is focused. Turn it
-   off if you would rather Return did nothing there.
-
-### Meeting Details
-
-Hover over the menu bar text to see a tooltip with:
-- Full meeting title
-- Start and end times
-- Duration
-- Participant names
-- Video conference link (if available)
-
-### Video Conference Integration
-
-The app automatically detects video conference links from:
-- Event URL field
-- Event notes/description
-
-Supported platforms:
-- Zoom
-- Google Meet
-- Microsoft Teams
-- Webex
-
-Click a meeting in the dropdown menu to open its video conference link in your browser.
-
-## Technical Details
-
-### Architecture
-
-- **Pure AppKit**: No SwiftUI dependency for optimal memory usage
-- **EventKit Framework**: Calendar access and event management
-- **ServiceManagement**: Launch at login functionality
-- **NSStatusItem**: Menu bar integration
-- **NotificationCenter**: Calendar change and system wake detection
-
-### Files Structure
-
-```
-MeetingsAlert/
-├── MeetingsAlertApp.swift      # Main app logic and UI
-├── CalendarManager.swift       # Calendar integration and meeting data
-├── Info.plist                  # App configuration
-└── MeetingsAlert.entitlements  # Sandbox permissions
-```
-
-### Calendar Access
-
-The app requires Full Access to your calendar on macOS 14+ (or regular access on earlier versions). This permission allows the app to:
-- Read event titles, times, and details
-- Access participant information
-- Detect video conference links
-
-The app does NOT modify your calendar in any way - it only reads event data.
-
-### Update Mechanisms
-
-The app updates meeting information through three mechanisms:
-
-1. **Timer-based**: Every 30 seconds
-2. **Calendar changes**: Immediate update when events are created, modified, or deleted
-3. **System wake**: Immediate update when computer wakes from sleep
-
-### Memory Optimization
-
-The app is optimized for low memory usage:
-- Pure AppKit instead of SwiftUI
-- Reused DateFormatter instances
-- No caching of event data
-- Approximately 39MB RAM usage
+1. **Display Format** — which of the four menu bar formats above to use
+2. **Animation** — scroll long titles when you hover them. Off by default, so the menu bar
+   stays still
+3. **Meeting Alert** — **Press Return to join the meeting**. On by default. Turn it off if
+   you would rather Return did nothing while the panel is focused
 
 ## Troubleshooting
 
-### App Not Showing Meetings
+**No meetings showing.** Check System Settings → Privacy & Security → Calendars. On macOS
+14 and later the app needs **Full Access**; Write-Only cannot read your events. Restart the
+app after changing it.
 
-1. Check calendar access permissions in System Settings > Privacy & Security > Calendars
-2. If using macOS 14+, ensure Full Access is granted (not just Write-Only)
-3. Restart the app
+**The app vanished after you granted permission.** Expected on first launch. Start it
+again and it will stay.
 
-### Calendar Access Reset
+**Meetings look stale.** The app refreshes every 30 seconds, immediately when the calendar
+changes, and on waking from sleep. If something still looks wrong, use **Refresh**, or quit
+and reopen.
 
-If you need to reset permissions:
+**Start over with permissions.**
 
 ```bash
-tccutil reset Calendar com.meetingsalert.app
+tccutil reset Calendar com.meetingalerts.app
 ```
 
-Then restart the app and grant permission again.
+Then restart the app and grant access again. (The identifier does not match the app's name
+for historical reasons — it is correct as written.)
 
-### App Disappeared After Granting Permission
+## Good to know
 
-This is expected behavior during first launch. Restart the app after granting calendar access.
+- Only today's and tomorrow's meetings appear, and all-day events are skipped
+- The menu bar text is capped at 8 characters; hover for the rest, or turn on scrolling
+- Your calendar is never modified — the app only reads it
+- Nothing leaves your Mac. No servers, no analytics, no network calls of any kind
 
-### Meetings Not Updating
+## Upgrading from MeetingsAlert 1.2.0 or earlier
 
-The app should update automatically through:
-- Calendar change detection
-- Wake from sleep detection
-- 30-second timer
+Version 1.3.0 renamed the app, which has two consequences worth knowing:
 
-If meetings still don't update, quit and restart the app.
-
-### Menu Items Greyed Out
-
-This should not occur in the current version. If it does, restart the app.
-
-## Known Limitations
-
-- Only shows meetings from today and tomorrow
-- Requires Full Access on macOS 14+ (Read-Only access is not sufficient for reading events)
-- Only displays non-all-day events
-- Menu bar display limited to 8 characters (scrolls on hover when enabled)
+1. **Delete the old `MeetingsAlert.app` from Applications.** Otherwise both run and you get
+   two menu bar icons and two alerts for every meeting.
+2. **Calendar access and settings reset once.** macOS ties permissions and preferences to
+   an app's internal identifier, which changed with the rename. Grant Full Access again
+   when prompted and set your display format back. This happens only for this one upgrade.
 
 ## Development
 
-### Building from Source
-
-With Xcode: open `MeetingsAlert.xcodeproj`, select your development team, build and run.
-
-Without Xcode (Command Line Tools are enough):
-
-```bash
-./scripts/release.sh --no-notarize
-```
-
-This compiles a universal (arm64 + x86_64) binary with `swiftc`, assembles the `.app`
-bundle, signs it, and writes `build/MeetingsAlert.dmg`.
-
-### Releasing to Other Machines
-
-A build that only runs locally is not enough — macOS Gatekeeper blocks unnotarized apps
-on other people's Macs. The full pipeline is:
-
-```bash
-./scripts/release.sh
-```
-
-It builds, signs with the Developer ID certificate, submits to Apple's notary service,
-staples the ticket, and promotes the result to `MeetingsAlert.dmg` in the repository root.
-Only that final stapled DMG should be shared.
-
-To cut a GitHub release and upload the DMG in the same run:
-
-```bash
-./scripts/release.sh --publish v1.1.0
-```
-
-This refuses to run if the build is not notarized, if the tag is malformed, or if the
-release already exists — bump `MARKETING_VERSION` in the script first. Requires the
-`gh` CLI, authenticated (`gh auth login`).
-
-One-time notarization setup (stores credentials in the login keychain):
-
-```bash
-xcrun notarytool store-credentials MeetingsAlertNotary \
-  --apple-id <your-apple-id> --team-id <your-team-id> \
-  --password <app-specific-password>
-```
-
-App-specific passwords are created at <https://account.apple.com> under
-Sign-In and Security. Requirements: an active Apple Developer Program membership and a
-"Developer ID Application" certificate in the login keychain.
-
-To confirm a DMG is ready to hand out:
-
-```bash
-xcrun stapler validate MeetingsAlert.dmg
-spctl -a -vvv -t open --context context:primary-signature MeetingsAlert.dmg
-```
-
-### Key Components
-
-#### CalendarManager
-
-Handles all calendar-related operations:
-- Permission requests
-- Event fetching
-- Meeting data extraction
-- Calendar change notifications
-
-#### MeetingsAlertApp
-
-Main application logic:
-- Menu bar UI management
-- Meeting display formatting
-- Scrolling animation
-- Settings management
-- Alert notifications
-- User interaction handling
-
-### Custom Components
-
-**StatusBarButton**: Custom NSView for instant tooltips without system delay
-
-**DisplayFormat Enum**: Four display format options for user preference
-
-**Meeting Struct**: Data model with computed properties for active status, time remaining, and duration
-
-## Privacy
-
-- The app only reads calendar data locally on your Mac
-- No data is sent to any external servers
-- Calendar access is protected by macOS sandboxing and requires explicit permission
+Building, the release pipeline, architecture and notarization are documented in
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 
 Copyright 2025. All rights reserved.
-
-## Credits
-
-Built with Swift and AppKit for macOS.

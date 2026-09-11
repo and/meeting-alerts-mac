@@ -7,6 +7,6 @@ import Foundation
 @inline(__always)
 func debugLog(_ message: @autoclosure () -> String) {
     #if DEBUG
-    print("[MeetingsAlert] \(message())")
+    print("[MeetingAlerts] \(message())")
     #endif
 }
