@@ -8,7 +8,7 @@
 #
 # One-time setup for notarization (stores credentials in the login keychain):
 #   xcrun notarytool store-credentials MeetingsAlertNotary \
-#     --apple-id <your-apple-id> --team-id RLVYQT69D4 --password <app-specific-password>
+#     --apple-id <your-apple-id> --team-id <your-team-id> --password <app-specific-password>
 # App-specific passwords come from https://account.apple.com -> Sign-In and Security.
 
 set -euo pipefail
@@ -18,7 +18,12 @@ BUNDLE_ID="com.meetingsalert.app"
 MARKETING_VERSION="1.2.0"
 BUILD_VERSION="5"
 DEPLOYMENT_TARGET="13.0"
-SIGN_IDENTITY="Developer ID Application: Your Name (RLVYQT69D4)"
+# codesign matches this against the certificate's common name, and a unique substring is
+# enough. Left generic so the script carries no personal detail; override it if the
+# keychain holds more than one Developer ID certificate:
+#   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./scripts/release.sh
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
+TEAM_ID="${TEAM_ID:-RLVYQT69D4}"
 NOTARY_PROFILE="MeetingsAlertNotary"
 
 REPO="and/meeting-alerts-mac"
@@ -116,7 +121,7 @@ fi
 if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
   echo "ERROR: notarytool profile '$NOTARY_PROFILE' not found. Run:" >&2
   echo "  xcrun notarytool store-credentials $NOTARY_PROFILE \\" >&2
-  echo "    --apple-id <your-apple-id> --team-id RLVYQT69D4 --password <app-specific-password>" >&2
+  echo "    --apple-id <your-apple-id> --team-id $TEAM_ID --password <app-specific-password>" >&2
   exit 1
 fi
 

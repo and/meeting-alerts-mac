@@ -244,7 +244,7 @@ One-time notarization setup (stores credentials in the login keychain):
 
 ```bash
 xcrun notarytool store-credentials MeetingsAlertNotary \
-  --apple-id <your-apple-id> --team-id RLVYQT69D4 \
+  --apple-id <your-apple-id> --team-id <your-team-id> \
   --password <app-specific-password>
 ```
 
