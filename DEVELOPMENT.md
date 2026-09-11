@@ -61,9 +61,9 @@ xcrun notarytool store-credentials MeetingsAlertNotary \
   --key AuthKey_XXXXXXXXXX.p8 --key-id <KEY_ID> --issuer <ISSUER_UUID>
 ```
 
-The profile name is `MeetingsAlertNotary` — it names a keychain item created before the
-app was renamed, and is unrelated to the app's own name. Override it with the
-`NOTARY_PROFILE` environment variable.
+`MeetingsAlertNotary` names a keychain item, not the app, which is why it does not match.
+Override it with the `NOTARY_PROFILE` environment variable if you store credentials under a
+different name.
 
 Requirements: an active Apple Developer Program membership and a Developer ID Application
 certificate in the login keychain. The script picks the certificate up by substring match,
@@ -170,6 +170,6 @@ the call fails rather than producing a blank image.
 ## Bundle identifier
 
 `com.meetingalerts.app`. macOS keys calendar permission, the Launch at Login registration
-and all saved settings to this string, so changing it resets those for every existing user.
-It is also referenced by `SMAuthorizedClients` inside `Info.plist`. Version 1.3.0 changed it
-once, as part of renaming the app; there is no reason to change it again.
+and all saved settings to this string, so changing it silently resets all three for every
+existing user - they must grant Full Access again and lose their preferences. It is also
+referenced by `SMAuthorizedClients` inside `Info.plist`. Treat it as fixed.

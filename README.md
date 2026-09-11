@@ -99,16 +99,6 @@ for historical reasons — it is correct as written.)
 - Your calendar is never modified — the app only reads it
 - Nothing leaves your Mac. No servers, no analytics, no network calls of any kind
 
-## Upgrading from MeetingsAlert 1.2.0 or earlier
-
-Version 1.3.0 renamed the app, which has two consequences worth knowing:
-
-1. **Delete the old `MeetingsAlert.app` from Applications.** Otherwise both run and you get
-   two menu bar icons and two alerts for every meeting.
-2. **Calendar access and settings reset once.** macOS ties permissions and preferences to
-   an app's internal identifier, which changed with the rename. Grant Full Access again
-   when prompted and set your display format back. This happens only for this one upgrade.
-
 ## Development
 
 Building, the release pipeline, architecture and notarization are documented in
