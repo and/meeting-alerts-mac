@@ -37,7 +37,8 @@ If a meeting is running and the next one starts within 30 minutes, the upcoming 
 over, on the grounds that it is the one you still have to act on.
 
 **Click the icon** for your next three meetings, Settings, Launch at Login, Refresh and
-Quit. Clicking a meeting opens its video call if it has one.
+Quit. Clicking a meeting opens its video call if it has one. Launch at Login is on from
+the first run — untick it there to stop the app starting with your Mac.
 
 **Hover the text** for a tooltip with the full title, times, duration, participants and
 the video link — useful when the title is too long for the menu bar.

@@ -245,6 +245,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         debugLog("🚀 MeetingAlerts: Application starting...")
 
+        // Launching at login is the default: the app is only useful if it is already
+        // running when a meeting comes up. The first run registers the login item so
+        // the menu's checkmark matches what the system actually does.
+        UserDefaults.standard.register(defaults: ["launchAtLogin": true])
+        applyDefaultLoginItemIfNeeded()
+
         let fixedWidth: CGFloat = 80
         statusItem = NSStatusBar.system.statusItem(withLength: fixedWidth)
         debugLog("📊 Status item created: \(statusItem != nil)")
@@ -629,21 +635,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         launchAtLogin.toggle()
     }
 
-    private func updateLoginItem(enabled: Bool) {
+    private func applyDefaultLoginItemIfNeeded() {
+        let appliedKey = "launchAtLoginDefaultApplied"
+        guard !UserDefaults.standard.bool(forKey: appliedKey) else { return }
+        UserDefaults.standard.set(true, forKey: appliedKey)
+
+        guard launchAtLogin else { return }
+        // Nothing the user did, so report failures to the log rather than to them.
+        updateLoginItem(enabled: true, silent: true)
+    }
+
+    private func updateLoginItem(enabled: Bool, silent: Bool = false) {
         let appPath = Bundle.main.bundlePath
 
         // Check if app is in a temporary/development location
         if appPath.contains("DerivedData") || appPath.contains("/var/folders/") {
-            DispatchQueue.main.async { [weak self] in
+            debugLog("⚠️ Not registering login item: app runs from \(appPath)")
+            UserDefaults.standard.set(false, forKey: "launchAtLogin")
+            guard !silent else { return }
+
+            DispatchQueue.main.async {
                 let alert = NSAlert()
                 alert.messageText = "Install App First"
                 alert.informativeText = "To enable Launch at Login, please copy the app to your Applications folder first.\n\nYou can do this by running:\ncp -r '\(appPath)' /Applications/"
                 alert.alertStyle = .informational
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
-
-                // Reset the preference
-                UserDefaults.standard.set(false, forKey: "launchAtLogin")
             }
             return
         }
@@ -659,7 +676,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } catch {
                 debugLog("⚠️ Failed to update launch at login: \(error.localizedDescription)")
-                showLoginItemError(error.localizedDescription)
+                if !silent {
+                    showLoginItemError(error.localizedDescription)
+                }
             }
         } else {
             // Fallback for older macOS versions
