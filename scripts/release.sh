@@ -20,8 +20,8 @@ SRC_DIR="MeetingAlerts"          # source tree and entitlements filename, intern
 # saved settings to this identifier; changing it would silently reset all three for every
 # existing user, for a string nobody ever sees.
 BUNDLE_ID="com.meetingalerts.app"
-MARKETING_VERSION="1.3.0"
-BUILD_VERSION="6"
+MARKETING_VERSION="1.4.0"
+BUILD_VERSION="7"
 DEPLOYMENT_TARGET="13.0"
 # codesign matches this against the certificate's common name, and a unique substring is
 # enough. Left generic so the script carries no personal detail; override it if the
